@@ -19,8 +19,21 @@
 		"import/no-unresolved": "off",
 		"consistent-return": "off",
 		"no-restricted-syntax": "off",
-		"max-len":"off",
+		"max-len": "off",
 		"no-tabs": "off",
-		"no-use-before-define": "off"
+		"no-use-before-define": "off",
+		"@typescript-eslint/no-unused-vars": "error",
+		"import/extensions": [
+			"error",
+			"ignorePackages"
+		],
+		"import/no-extraneous-dependencies": [
+			"error",
+			{
+				"devDependencies": [
+					"tools/***"
+				]
+			}
+		]
 	}
 }

@@ -1,9 +1,92 @@
 import * as vscode from 'vscode';
-import { hooks as actions } from '@wp-hooks/wordpress-core/hooks/actions.json';
-import { hooks as filters } from '@wp-hooks/wordpress-core/hooks/filters.json';
-import { Hook, Tag } from '@wp-hooks/wordpress-core/interface';
+import coreActions from '@wp-hooks/wordpress-core/hooks/actions.json';
+import coreFilters from '@wp-hooks/wordpress-core/hooks/filters.json';
+import HooksRepository from './hooks.js';
+import type { Hook, Tag, Hooks } from '../interface/hooks.d.ts';
+import { isHooksContainer } from './helpers.js';
+import type { CustomHooks } from '../interface/configuration.d.ts';
 
-const extensionName = 'vscode-wordpress-hooks';
+const extensionName: string = 'vscode-wordpress-hooks';
+const openSettings: string = 'Open Settings';
+
+let actions: Hooks = [];
+let filters: Hooks = [];
+
+const wpDocLinkTemplate = '[View on developer.wordpress.org →](https://developer.wordpress.org/reference/hooks/{{ name | downcase | replace_regex: "[^a-z_-]", "", "g" }}/)';
+
+const hooksRepo = new HooksRepository();
+
+function pushHooks() {
+	Promise
+		.allSettled([
+			Promise.resolve(hooksRepo.push(
+				{
+					...coreFilters,
+					docLinkTemplate: wpDocLinkTemplate,
+				},
+				{
+					...coreActions,
+					docLinkTemplate: wpDocLinkTemplate,
+				},
+			)),
+			...getCustomHooks().map((promise) => promise.then(hooksRepo.push)),
+		])
+		.then((results) => {
+			actions = hooksRepo.filter({ type: 'action' });
+			filters = hooksRepo.filter({ type: 'filter' });
+
+			let fileErrors = '';
+			results.forEach((result) => {
+				if (result.status !== 'rejected') return;
+
+				const { reason } = result;
+
+				if (reason instanceof vscode.FileSystemError || reason instanceof TypeError) {
+					fileErrors += `\n${reason.message}`;
+				}
+			});
+
+			if (fileErrors) {
+				vscode.window
+					.showErrorMessage(`Unable to load files:\n${fileErrors}`, openSettings)
+					.then((choice) => {
+						switch (choice) {
+							case openSettings:
+								vscode.commands.executeCommand('workbench.action.openSettings', `${extensionName}.customHooks.hooks`);
+								break;
+							default:
+								break;
+						}
+					});
+			}
+		});
+}
+
+function getCustomHooks() {
+	const hooks: CustomHooks = vscode.workspace.getConfiguration(extensionName).get('customHooks.hooks') ?? [];
+	return hooks.map(async (hook) => {
+		let container; let file; let
+docLinkTemplate;
+
+		if (typeof hook === 'string') {
+			file = hook;
+		} else {
+			({ file, docLinkTemplate } = hook);
+		}
+		try {
+			container = await import(file);
+		} catch (error) {
+			throw vscode.FileSystemError.FileNotFound(file);
+		}
+
+		if (!isHooksContainer(container)) {
+			throw new TypeError(file);
+		}
+
+		if (docLinkTemplate) container.docLinkTemplate = docLinkTemplate;
+		return container;
+	});
+}
 
 function getHookCompletion(
 	hook: Hook,
@@ -23,9 +106,10 @@ function getHookDescription(
 	hook: Hook,
 ): vscode.MarkdownString {
 	let description = hook.doc.long_description;
-	const slug = getHookSlug(hook);
 
-	description += `\n\n[View on developer.wordpress.org →](https://developer.wordpress.org/reference/hooks/${slug}/)\n\n`;
+	if (hook.docLink) {
+		description += `\n\n${hook.docLink()}\n\n`;
+	}
 
 	const params = hook.doc.tags.filter((tag) => tag.name === 'param');
 
@@ -45,12 +129,6 @@ function getHookDescription(
 	});
 
 	return new vscode.MarkdownString(description);
-}
-
-function getHookSlug(
-	hook: Hook,
-): string {
-	return hook.name.toLowerCase().replace(/[^a-z_-]/g, '');
 }
 
 function isInFilter(
@@ -75,35 +153,8 @@ function isInFunctionDeclaration(
 function getHook(
 	name: string,
 ): Hook | void {
-	let hooks = filters.filter((filter) => {
-		if (filter.name === name) {
-			return true;
-		}
-
-		if (filter.aliases?.includes(name)) {
-			return true;
-		}
-
-		return false;
-	});
-
-	if (hooks.length === 0) {
-		hooks = actions.filter((action) => {
-			if (action.name === name) {
-				return true;
-			}
-
-			if (action.aliases?.includes(name)) {
-				return true;
-			}
-
-			return false;
-		});
-	}
-
-	if (hooks.length) {
-		return hooks[0];
-	}
+	const match = hooksRepo.find((hook) => name === hook.name || hook.aliases?.includes(name));
+	if (match) return match;
 }
 
 interface tagType {
@@ -206,7 +257,7 @@ function getTagType(
 
 function getReturnType(
 	tag: Tag,
-) : tagType | null {
+): tagType | null {
 	// Return type declarations require PHP 7 or higher.
 	if (getMinPHPVersion() < 7) {
 		return null;
@@ -215,7 +266,7 @@ function getReturnType(
 	return getTagType(tag);
 }
 
-function getMinPHPVersion() : number {
+function getMinPHPVersion(): number {
 	const typeDeclarationsEnabled: boolean = vscode.workspace.getConfiguration(extensionName).get('typeDeclarations.enable') ?? true;
 	const typeDeclarationsSupportSetting: string = vscode.workspace.getConfiguration(extensionName).get('typeDeclarations.olderPhpVersionSupport') ?? '';
 
@@ -240,7 +291,7 @@ interface contextualPosition {
 function getContainingSymbol(
 	symbols: vscode.DocumentSymbol[],
 	position: vscode.Position,
-) : contextualPosition {
+): contextualPosition {
 	const inside = symbols.filter((symbol) => symbol.range.contains(position));
 	const inNamespace = symbols.filter((symbol) => (vscode.SymbolKind.Namespace === symbol.kind)).length > 0;
 
@@ -269,6 +320,15 @@ function getContainingSymbol(
 
 	return context;
 }
+
+vscode.workspace.onDidChangeConfiguration((event) => {
+	if (event.affectsConfiguration(`${extensionName}.customHooks.hooks`)) {
+		hooksRepo.clear();
+		pushHooks();
+	}
+});
+
+pushHooks();
 
 export function activate(
 	context: vscode.ExtensionContext,
@@ -627,7 +687,7 @@ export function activate(
 					return undefined;
 				}
 
-				const hook = getHook(document.getText(document.getWordRangeAtPosition(position)));
+				const hook = getHook(document.getText(document.getWordRangeAtPosition(position, /(['"])[^'"]*\1/)).slice(1, -1));
 
 				if (!hook) {
 					return undefined;

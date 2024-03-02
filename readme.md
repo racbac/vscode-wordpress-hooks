@@ -57,6 +57,22 @@ Yes, open the preferences for VS Code and go to the **Extensions -> WordPress Ho
 
 They're generated directly from the WordPress core software and updated in time for each new release. They're bundled with this extension so there's no requirement for your project to include WordPress if you don't want to, and the extension doesn't scan the files in your project looking for actions and filters.
 
+
+### Can I use my own list of hook names?
+
+Yes. Generate JSON representations of the WordPress actions and filters in your code using https://github.com/wp-hooks/generator, and the paths of the resulting JSON files(s) to extension settings; open the preferences for VS Code and go to the **Extensions -> WordPress Hooks Intellisense > Custom Hooks** section.
+
+For each file, you can specify a `docLinkTemplate`: a [LiquidJS](https://liquidjs.com/tutorials/intro-to-liquid.html) template for documentation links for the file's hooks. The template receives a [Hook](https://github.com/wp-hooks/generator/blob/master/interface/index.d.ts#L30) as context and supports the following filters (in addition to [Liquid's built-in filters](https://liquidjs.com/filters/overview.html)):
+
+* `replace_regex`
+  * Description: Perform a regular expression search replace.
+  * Arguments:
+    1. Pattern of the regular expression, as a string (*not* a [literal](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp#literal_notation_and_constructor)).
+    2. String that replaces matches.
+    3. Optionally, a string of flags added to the regular expression.
+ * Example: `{{ "Interrobang???! What's that?!?" | replace_regex: "(!+\?|\?+!)[?!]*", "‽", "g" }}`
+
+
 ## Sponsors
 
 The time that I spend maintaining this extension and other tools is in part sponsored by:
