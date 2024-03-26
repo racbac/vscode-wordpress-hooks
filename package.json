@@ -148,6 +148,7 @@
 	},
 	"dependencies": {
 		"@wp-hooks/wordpress-core": "^1.6.0",
+		"glob": "^10.3.10",
 		"liquidjs": "^10.10.1"
 	}
 }

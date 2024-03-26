@@ -53,7 +53,7 @@ export default class HooksRepository {
         return result.length ? result[0] : undefined;
     };
 
-    push = (...sources: Array<HooksContainer | Hooks>) => sources.map((source) => {
+    push = (...sources: Array<HooksContainer | Hooks>) => sources.flatMap((source) => {
             let container: HooksContainer;
             if (isHooksContainer(source)) {
                 container = source;

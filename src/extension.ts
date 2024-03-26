@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 import coreActions from '@wp-hooks/wordpress-core/hooks/actions.json';
 import coreFilters from '@wp-hooks/wordpress-core/hooks/filters.json';
+import { glob } from 'glob';
+
 import HooksRepository from './hooks.js';
 import type { Hook, Tag, Hooks } from '../interface/hooks.d.ts';
 import { isHooksContainer } from './helpers.js';
-import type { CustomHooks } from '../interface/configuration.d.ts';
+import type { CustomHooks, DocumentationLinkTemplate } from '../interface/configuration.d.ts';
 
 const extensionName: string = 'vscode-wordpress-hooks';
 const openSettings: string = 'Open Settings';
@@ -17,26 +19,33 @@ const wpDocLinkTemplate = '[View on developer.wordpress.org →](https://develop
 const hooksRepo = new HooksRepository();
 
 function pushHooks() {
-	Promise
-		.allSettled([
-			Promise.resolve(hooksRepo.push(
-				{
-					...coreFilters,
-					docLinkTemplate: wpDocLinkTemplate,
-				},
-				{
-					...coreActions,
-					docLinkTemplate: wpDocLinkTemplate,
-				},
-			)),
-			...getCustomHooks().map((promise) => promise.then(hooksRepo.push)),
-		])
-		.then((results) => {
-			actions = hooksRepo.filter({ type: 'action' });
-			filters = hooksRepo.filter({ type: 'filter' });
+	hooksRepo.push(
+		{
+			...coreFilters,
+			docLinkTemplate: wpDocLinkTemplate,
+		},
+		{
+			...coreActions,
+			docLinkTemplate: wpDocLinkTemplate,
+		},
+	);
+	actions = hooksRepo.filter({ type: 'action' });
+	filters = hooksRepo.filter({ type: 'filter' });
 
+	Promise
+		.allSettled(getCustomHooks()
+			.map((prom) => prom.then((prom1) => Promise.allSettled(prom1.map(
+				(prom2) => prom2.then((container) => {
+					hooksRepo.push(container);
+					actions = hooksRepo.filter({ type: 'action' });
+					filters = hooksRepo.filter({ type: 'filter' });
+
+					return container;
+				}),
+			)))))
+		.then((results) => {
 			let fileErrors = '';
-			results.forEach((result) => {
+			results.flatMap((promise) => (promise.status === 'fulfilled' ? promise.value : promise)).forEach((result) => {
 				if (result.status !== 'rejected') return;
 
 				const { reason } = result;
@@ -65,26 +74,33 @@ function pushHooks() {
 function getCustomHooks() {
 	const hooks: CustomHooks = vscode.workspace.getConfiguration(extensionName).get('customHooks.hooks') ?? [];
 	return hooks.map(async (hook) => {
-		let container; let file; let
-docLinkTemplate;
+		let container; let pattern; let
+			docLinkTemplate: undefined | DocumentationLinkTemplate;
 
 		if (typeof hook === 'string') {
-			file = hook;
+			pattern = hook;
 		} else {
-			({ file, docLinkTemplate } = hook);
-		}
-		try {
-			container = await import(file);
-		} catch (error) {
-			throw vscode.FileSystemError.FileNotFound(file);
+			({ file: pattern, docLinkTemplate } = hook);
 		}
 
-		if (!isHooksContainer(container)) {
-			throw new TypeError(file);
-		}
+		const files = await glob(pattern);
 
-		if (docLinkTemplate) container.docLinkTemplate = docLinkTemplate;
-		return container;
+		if (files.length === 0) throw vscode.FileSystemError.FileNotFound(pattern);
+
+		return files.map(async (file) => {
+			try {
+				container = await import(file);
+			} catch (error) {
+				throw vscode.FileSystemError.FileNotFound(file);
+			}
+
+			if (!isHooksContainer(container)) {
+				throw new TypeError(file);
+			}
+
+			if (docLinkTemplate) container.docLinkTemplate = docLinkTemplate;
+			return container;
+		});
 	});
 }
 
