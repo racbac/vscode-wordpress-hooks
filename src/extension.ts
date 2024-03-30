@@ -18,6 +18,11 @@ const wpDocLinkTemplate = '[View on developer.wordpress.org →](https://develop
 
 const hooksRepo = new HooksRepository();
 
+/**
+ * Load hooks.
+ *
+ * Loads hooks from configuration into repository and variables.
+ */
 function pushHooks() {
 	hooksRepo.push(
 		{
@@ -34,8 +39,8 @@ function pushHooks() {
 
 	Promise
 		.allSettled(getCustomHooks()
-			.map((prom) => prom.then((prom1) => Promise.allSettled(prom1.map(
-				(prom2) => prom2.then((container) => {
+			.map((filesProm) => filesProm.then((containerProms) => Promise.allSettled(containerProms.map(
+				(containerProm) => containerProm.then((container) => {
 					hooksRepo.push(container);
 					actions = hooksRepo.filter({ type: 'action' });
 					filters = hooksRepo.filter({ type: 'filter' });
@@ -43,9 +48,9 @@ function pushHooks() {
 					return container;
 				}),
 			)))))
-		.then((results) => {
+		.then((filesResults) => {
 			let fileErrors = '';
-			results.flatMap((promise) => (promise.status === 'fulfilled' ? promise.value : promise)).forEach((result) => {
+			filesResults.flatMap((filesResult) => (filesResult.status === 'fulfilled' ? filesResult.value : filesResult)).forEach((result) => {
 				if (result.status !== 'rejected') return;
 
 				const { reason } = result;
@@ -71,21 +76,26 @@ function pushHooks() {
 		});
 }
 
+/**
+ * Resolve custom hooks from configuration.
+ *
+ * @returns Promises, each resovling to additional promises to HooksContainers.
+ */
 function getCustomHooks() {
-	const hooks: CustomHooks = vscode.workspace.getConfiguration(extensionName).get('customHooks.hooks') ?? [];
-	return hooks.map(async (hook) => {
-		let container; let pattern; let
+	const configs: CustomHooks = vscode.workspace.getConfiguration(extensionName).get('customHooks.hooks') ?? [];
+	return configs.map(async (config) => {
+		let container; let filesPattern; let
 			docLinkTemplate: undefined | DocumentationLinkTemplate;
 
-		if (typeof hook === 'string') {
-			pattern = hook;
+		if (typeof config === 'string') {
+			filesPattern = config;
 		} else {
-			({ file: pattern, docLinkTemplate } = hook);
+			({ file: filesPattern, docLinkTemplate } = config);
 		}
 
-		const files = await glob(pattern);
+		const files = await glob(filesPattern);
 
-		if (files.length === 0) throw vscode.FileSystemError.FileNotFound(pattern);
+		if (files.length === 0) throw vscode.FileSystemError.FileNotFound(filesPattern);
 
 		return files.map(async (file) => {
 			try {
