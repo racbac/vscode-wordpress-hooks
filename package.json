@@ -132,6 +132,7 @@
 		"build:types": "node tools/json2ts.js"
 	},
 	"devDependencies": {
+		"@types/is-glob": "^4.0.4",
 		"@types/node": "^18",
 		"@types/vscode": "^1",
 		"@typescript-eslint/eslint-plugin": "^5",
@@ -149,6 +150,7 @@
 	"dependencies": {
 		"@wp-hooks/wordpress-core": "^1.6.0",
 		"glob": "^10.3.10",
+		"is-glob": "^4.0.3",
 		"liquidjs": "^10.10.1"
 	}
 }

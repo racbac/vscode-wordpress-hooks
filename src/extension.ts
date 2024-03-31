@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import coreActions from '@wp-hooks/wordpress-core/hooks/actions.json';
 import coreFilters from '@wp-hooks/wordpress-core/hooks/filters.json';
-import { glob } from 'glob';
+import isGlob from 'is-glob';
+import fs from 'fs/promises';
 
 import HooksRepository from './hooks.js';
 import type { Hook, Tag, Hooks } from '../interface/hooks.d.ts';
@@ -49,20 +50,20 @@ function pushHooks() {
 				}),
 			)))))
 		.then((filesResults) => {
-			let fileErrors = '';
+			const errors: Array<string> = [];
 			filesResults.flatMap((filesResult) => (filesResult.status === 'fulfilled' ? filesResult.value : filesResult)).forEach((result) => {
 				if (result.status !== 'rejected') return;
 
 				const { reason } = result;
 
-				if (reason instanceof vscode.FileSystemError || reason instanceof TypeError) {
-					fileErrors += `\n${reason.message}`;
+				if (reason instanceof Error) {
+					errors.push(reason.message);
 				}
 			});
 
-			if (fileErrors) {
+			if (errors.length) {
 				vscode.window
-					.showErrorMessage(`Unable to load files:\n${fileErrors}`, openSettings)
+					.showErrorMessage(`Errors while loading custom hooks: ${errors.join(', ')}`, openSettings)
 					.then((choice) => {
 						switch (choice) {
 							case openSettings:
@@ -84,7 +85,7 @@ function pushHooks() {
 function getCustomHooks() {
 	const configs: CustomHooks = vscode.workspace.getConfiguration(extensionName).get('customHooks.hooks') ?? [];
 	return configs.map(async (config) => {
-		let container; let filesPattern; let
+		let filesPattern; let
 			docLinkTemplate: undefined | DocumentationLinkTemplate;
 
 		if (typeof config === 'string') {
@@ -93,22 +94,54 @@ function getCustomHooks() {
 			({ file: filesPattern, docLinkTemplate } = config);
 		}
 
-		const files = await glob(filesPattern);
+		let files = [filesPattern];
+		let logCtx = {};
 
-		if (files.length === 0) throw vscode.FileSystemError.FileNotFound(filesPattern);
+		if (isGlob(filesPattern)) {
+			const { glob } = await import('glob');
+			files = await glob(filesPattern);
+			logCtx = {
+				glob: filesPattern,
+			};
+		}
+
+		if (files.length === 0) {
+			throw new Error(`Files not found (${JSON.stringify(logCtx)})`, {
+				cause: vscode.FileSystemError.FileNotFound(filesPattern),
+			});
+		}
 
 		return files.map(async (file) => {
+			let container;
+			const fileLogCtx = JSON.stringify({
+				...logCtx,
+				file,
+			});
+
 			try {
-				container = await import(file);
+				container = await fs.readFile(file, 'utf8');
 			} catch (error) {
-				throw vscode.FileSystemError.FileNotFound(file);
+				if (error instanceof Error) error.message += ` (${fileLogCtx})`;
+				throw error;
+			}
+
+			try {
+				container = JSON.parse(container);
+			} catch (error) {
+				if (error instanceof Error) error.message += ` (${fileLogCtx})`;
+				throw error;
 			}
 
 			if (!isHooksContainer(container)) {
-				throw new TypeError(file);
+				throw new TypeError(`File has invalid schema (${fileLogCtx})`);
 			}
 
-			if (docLinkTemplate) container.docLinkTemplate = docLinkTemplate;
+			if (docLinkTemplate) {
+				container = {
+					...container,
+					docLinkTemplate,
+				};
+			}
 			return container;
 		});
 	});
